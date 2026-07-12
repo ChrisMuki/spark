@@ -139,6 +139,74 @@ class PoolSuite extends SparkFunSuite with LocalSparkContext {
     scheduleTaskAndVerifyId(7, rootPool, 4)
   }
 
+  test("custom comparator overrides the fair scheduling order") {
+    sc = new SparkContext(LOCAL, APP_NAME)
+    val taskScheduler = new TaskSchedulerImpl(sc)
+
+    val rootPool = new Pool("", FAIR, 0, 0)
+    val poolA = new Pool("poolA", FIFO, 0, 1)
+    val poolB = new Pool("poolB", FIFO, 0, 1)
+    rootPool.addSchedulable(poolA)
+    rootPool.addSchedulable(poolB)
+
+    val taskSetManagerA = createTaskSetManager(0, 1, taskScheduler)
+    val taskSetManagerB = createTaskSetManager(1, 1, taskScheduler)
+    poolA.addSchedulable(taskSetManagerA)
+    poolB.addSchedulable(taskSetManagerB)
+
+    // By default the fair algorithm breaks the tie by pool name ascending, so poolA (stage 0)
+    // is scheduled before poolB (stage 1).
+    assert(rootPool.getSortedTaskSetQueue.map(_.stageId) === Seq(0, 1))
+
+    // Install a comparator that orders pools by name descending, flipping the order. Setting it on
+    // the root pool is enough to reorder the top-level pools.
+    rootPool.setTaskSetSchedulingAlgorithm(new ComparatorSchedulingAlgorithm(
+      (a: SchedulableInfo, b: SchedulableInfo) => b.name.compareTo(a.name)))
+    assert(rootPool.getSortedTaskSetQueue.map(_.stageId) === Seq(1, 0))
+
+    // Installing a fresh FairSchedulingAlgorithm brings back the built-in order.
+    rootPool.setTaskSetSchedulingAlgorithm(new FairSchedulingAlgorithm())
+    assert(rootPool.getSortedTaskSetQueue.map(_.stageId) === Seq(0, 1))
+  }
+
+  test("SparkContext.setFairSchedulingComparator installs and resets the comparator") {
+    val conf = new SparkConf().set("spark.scheduler.mode", "FAIR")
+    sc = new SparkContext(LOCAL, APP_NAME, conf)
+
+    val rootPool = sc.taskScheduler.rootPool
+    val poolA = new Pool("poolA", FIFO, 0, 1)
+    val poolB = new Pool("poolB", FIFO, 0, 1)
+    rootPool.addSchedulable(poolA)
+    rootPool.addSchedulable(poolB)
+
+    val taskScheduler = sc.taskScheduler.asInstanceOf[TaskSchedulerImpl]
+    poolA.addSchedulable(createTaskSetManager(0, 1, taskScheduler))
+    poolB.addSchedulable(createTaskSetManager(1, 1, taskScheduler))
+
+    assert(rootPool.getSortedTaskSetQueue.map(_.stageId) === Seq(0, 1))
+
+    sc.setFairSchedulingComparator(
+      (a: SchedulableInfo, b: SchedulableInfo) => b.name.compareTo(a.name))
+    assert(rootPool.getSortedTaskSetQueue.map(_.stageId) === Seq(1, 0))
+
+    sc.resetFairSchedulingComparator()
+    assert(rootPool.getSortedTaskSetQueue.map(_.stageId) === Seq(0, 1))
+  }
+
+  test("SparkContext.setFairSchedulingComparator requires FAIR scheduling mode") {
+    val conf = new SparkConf().set("spark.scheduler.mode", "FIFO")
+    sc = new SparkContext(LOCAL, APP_NAME, conf)
+
+    val comparator: java.util.Comparator[SchedulableInfo] =
+      (a: SchedulableInfo, b: SchedulableInfo) => b.name.compareTo(a.name)
+    intercept[IllegalStateException] {
+      sc.setFairSchedulingComparator(comparator)
+    }
+    intercept[IllegalStateException] {
+      sc.resetFairSchedulingComparator()
+    }
+  }
+
   test("Nested Pool Test") {
     sc = new SparkContext(LOCAL, APP_NAME)
     val taskScheduler = new TaskSchedulerImpl(sc)

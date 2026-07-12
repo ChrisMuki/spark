@@ -21,13 +21,37 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
+
+/**
+ * :: DeveloperApi ::
+ * A read-only view of the scheduling-relevant properties of a schedulable entity (a pool or a
+ * task set). This is the public contract handed to a custom [[java.util.Comparator]] installed via
+ * `SparkContext.setFairSchedulingComparator`, so that user code can decide the order of the fair
+ * scheduler pools without depending on (or being able to mutate) Spark-internal scheduler types.
+ */
+@DeveloperApi
+trait SchedulableInfo {
+  /** The name of the schedulable (pool name). */
+  def name: String
+  /** The pool weight configured in the fair scheduler allocation file. */
+  def weight: Int
+  /** The minimum share configured for the pool. */
+  def minShare: Int
+  /** The number of currently running tasks in the pool. */
+  def runningTasks: Int
+  /** The priority, used to break ties (mainly relevant for FIFO). */
+  def priority: Int
+  /** The stage id, used to break ties (mainly relevant for FIFO). */
+  def stageId: Int
+}
 
 /**
  * An interface for schedulable entities.
  * there are two type of Schedulable entities(Pools and TaskSetManagers)
  */
-private[spark] trait Schedulable {
+private[spark] trait Schedulable extends SchedulableInfo {
   var parent: Pool
   // child queues
   def schedulableQueue: ConcurrentLinkedQueue[Schedulable]

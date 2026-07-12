@@ -17,6 +17,8 @@
 
 package org.apache.spark.scheduler
 
+import java.util.Comparator
+
 /**
  * An interface for sort algorithm
  * FIFO: FIFO algorithm between TaskSetManagers
@@ -70,6 +72,21 @@ private[spark] class FairSchedulingAlgorithm extends SchedulingAlgorithm {
     } else {
       s1.name < s2.name
     }
+  }
+}
+
+/**
+ * A [[SchedulingAlgorithm]] that delegates the ordering decision to a user supplied
+ * [[java.util.Comparator]] over the public [[SchedulableInfo]] view. Following the usual
+ * `Comparator` contract, a negative result of `compare(s1, s2)` means `s1` is scheduled first.
+ *
+ * This is internal plumbing used to back `SparkContext.setFairSchedulingComparator`; users never
+ * construct it and only implement the comparator.
+ */
+private[spark] class ComparatorSchedulingAlgorithm(userComparator: Comparator[SchedulableInfo])
+  extends SchedulingAlgorithm {
+  override def comparator(s1: Schedulable, s2: Schedulable): Boolean = {
+    userComparator.compare(s1, s2) < 0
   }
 }
 

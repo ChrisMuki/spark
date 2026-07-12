@@ -47,7 +47,7 @@ private[spark] class Pool(
   val name = poolName
   var parent: Pool = null
 
-  private val taskSetSchedulingAlgorithm: SchedulingAlgorithm = {
+  @volatile private var taskSetSchedulingAlgorithm: SchedulingAlgorithm = {
     schedulingMode match {
       case SchedulingMode.FAIR =>
         new FairSchedulingAlgorithm()
@@ -57,6 +57,10 @@ private[spark] class Pool(
         val msg = s"Unsupported scheduling mode: $schedulingMode. Use FAIR or FIFO instead."
         throw new IllegalArgumentException(msg)
     }
+  }
+
+  private[spark] def setTaskSetSchedulingAlgorithm(algorithm: SchedulingAlgorithm): Unit = {
+    taskSetSchedulingAlgorithm = algorithm
   }
 
   override def isSchedulable: Boolean = true

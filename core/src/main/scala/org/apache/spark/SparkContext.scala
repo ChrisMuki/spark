@@ -19,7 +19,7 @@ package org.apache.spark
 
 import java.io._
 import java.net.URI
-import java.util.{Arrays, Locale, Properties, ServiceLoader, UUID}
+import java.util.{Arrays, Comparator, Locale, Properties, ServiceLoader, UUID}
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentMap}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 
@@ -2126,6 +2126,55 @@ class SparkContext(config: SparkConf) extends Logging {
   def getPoolForName(pool: String): Option[Schedulable] = {
     assertNotStopped()
     Option(taskScheduler.rootPool.schedulableNameToSchedulable.get(pool))
+  }
+
+  /**
+   * :: DeveloperApi ::
+   * Install a custom [[java.util.Comparator]] that decides the order in which the fair scheduler
+   * considers its top-level pools, replacing the built-in fair-sharing ordering at runtime. This
+   * lets applications override the scheduling order without restarting the context.
+   *
+   * The comparator operates on the read-only [[org.apache.spark.scheduler.SchedulableInfo]] view of
+   * each pool. Following the usual `java.util.Comparator` contract, a negative result means the
+   * first pool is scheduled before the second one.
+   *
+   * The comparator is installed on the root pool, i.e. it controls the ordering *between* the
+   * top-level pools; the ordering of task sets within a pool is unaffected. It takes effect
+   * immediately for all subsequent scheduling decisions.
+   *
+   * @param comparator the comparator used to order the fair scheduler pools
+   * @throws IllegalStateException if the context is not running with `spark.scheduler.mode=FAIR`
+   */
+  @DeveloperApi
+  def setFairSchedulingComparator(comparator: Comparator[SchedulableInfo]): Unit = {
+    assertNotStopped()
+    require(comparator != null, "comparator must not be null")
+    assertFairSchedulingMode()
+    taskScheduler.rootPool.setTaskSetSchedulingAlgorithm(
+      new ComparatorSchedulingAlgorithm(comparator))
+  }
+
+  /**
+   * :: DeveloperApi ::
+   * Restore the built-in fair scheduler pool ordering, undoing a previous call to
+   * `setFairSchedulingComparator`.
+   *
+   * @throws IllegalStateException if the context is not running with `spark.scheduler.mode=FAIR`
+   */
+  @DeveloperApi
+  def resetFairSchedulingComparator(): Unit = {
+    assertNotStopped()
+    assertFairSchedulingMode()
+    taskScheduler.rootPool.setTaskSetSchedulingAlgorithm(new FairSchedulingAlgorithm())
+  }
+
+  /** Fails unless the current scheduling mode is FAIR, guarding the fair pool comparator API. */
+  private def assertFairSchedulingMode(): Unit = {
+    if (getSchedulingMode != SchedulingMode.FAIR) {
+      throw new IllegalStateException(
+        "Setting a fair scheduling comparator requires 'spark.scheduler.mode=FAIR', but the " +
+          s"current scheduling mode is $getSchedulingMode.")
+    }
   }
 
   /**
